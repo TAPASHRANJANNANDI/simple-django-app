@@ -1,0 +1,23 @@
+{%extends "base.html" %} 
+{%block title%}about page{%endblock%} 
+{%block searchbar%} {%endblock%}
+{%block content%} 
+<div class="container mt-5">
+  <h2 class="mb-3 text-center">About This Application</h2>
+  <p class="lead text-center">
+    This is a simple <strong>Student Management Application</strong> built using <strong>Django</strong> and <strong>Bootstrap</strong>.
+  </p>
+  <p class="text-muted text-center">
+    The application allows users to easily <strong>add</strong>, <strong>update</strong>, and <strong>delete</strong> student records.
+    It demonstrates core Django features such as <strong>models, views, templates, forms, and messages</strong>.
+  </p>
+  <p class="text-center">
+    The goal of this project is to provide a basic understanding of how CRUD (Create, Read, Update, Delete) operations work in Django
+    with a clean and responsive interface.
+  </p>
+  <div class="text-center mt-4">
+    <a href="{% url 'index' %}" class="btn btn-primary">Go to Home</a>
+  </div>
+</div>
+
+{%endblock%}

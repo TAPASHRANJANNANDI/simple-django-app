@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}homepage {% endblock title %}
+{% block content %}
+{% if messages %}
+  {% for message in messages %}
+  <div class="alert alert-success alert-dismissible fade show" role="alert">
+    <strong>{{ message }}</strong>
+    <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+      <span aria-hidden="true">&times;</span>
+    </button>
+  </div>
+  {% endfor %}
+{% endif %}
+<div class="container my-4">
+  <h2>Student's Information</h2>
+  <a href="/add_student/" class="btn btn-success">Add Student</a> <br> <br>
+ <table class="table">
+  <thead class="thead-dark">
+    <tr>
+      <th scope="col">Roll number</th>
+      <th scope="col">Name</th>
+      <th scope="col">Email</th>
+      <th scope="col">Age</th>
+      <th scope="col">Address</th>
+      <th scope="col">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    {%for student in students %}
+    <tr>
+      <th scope="row">{{student.rollno}}</th>
+      <td>{{student.name}}</td>
+      <td>{{student.email}}</td>
+      <td>{{student.age}}</td>
+      <td>{{student.address}}</td>
+        <td><a href="{% url 'update_student' student.rollno %}" class= "btn btn-primary">Update</a> &nbsp; <a href="{% url 'delete_student' student.rollno %}" class= "btn btn-danger"> Delete</a></td>
+   
+    </tr>
+     {%endfor%}
+  </tbody>
+</table>
+</div>
+{% endblock%}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}contact page{% endblock %}
+{%block searchbar%} {%endblock%}
+{% block content %}
+<div class="container">
+  <h1>Contact Us</h1> 
+<form action="/contact/" method="post">
+{% csrf_token %}
+  <div class="mb-3">
+    <label for="exampleInputEmail1" class="form-label">Email address</label>
+    <input type="email" class="form-control"name= "email" id="exampleInputEmail1" aria-describedby="emailHelp">
+  
+  </div>
+  <div class="mb-3">
+    <label for="name" class="form-label">Name</label>
+    <input type="text" class="form-control" name= "name" id="exampleInputPassword1">
+  </div>
+  <div class="mb-3">
+    <label for="message" class="form-label">Message</label>
+    <textarea class="form-control" id="message" name="message"rows="3"></textarea>
+    </div>
+  
+  <button type="submit" class="btn btn-primary">Submit</button>
+</form>
+</div>
+{% endblock %}

@@ -30,7 +30,7 @@ def add_student(request):
         # Here you would typically save the data to the database
         # For example:
         student.objects.create(rollno=rollno, name=name, email=email, age=age, address=address)
-        message.success(request, "Student added successfully.")
+        messages.success(request, "Student added successfully.")
         return redirect('index')
     return render(request, 'add_student.html')
 def delete_student(request, rollno):

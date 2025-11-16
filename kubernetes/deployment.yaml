@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simple-django-app-deployment
+  labels:
+    app: simple-django-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: simple-django-app
+  template:
+    metadata:
+      labels:
+        app: simple-django-app
+    spec:
+      containers:
+      - name: simple-django-app
+        image: tapashranjannandi/simple-django-app-1:latest
+        ports:
+        - containerPort: 8000
+        env: 
+          - name: ALLOWED_HOSTS
+            value: "*"
+

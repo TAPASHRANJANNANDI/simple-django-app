@@ -4,19 +4,22 @@ metadata:
   name: simple-django-app-deployment
   labels:
     app: simple-django-app-green
+    version: green
 spec:
   replicas: 3
   selector:
     matchLabels:
       app: simple-django-app-green
+      version: green
   template:
     metadata:
       labels:
         app: simple-django-app-green
+        version: green
     spec:
       containers:
       - name: simple-django-app-green
-        image: tapashranjannandi/simple-django-app-1:latest
+        image: tapashranjannandi/simple-django-app-1:green
         ports:
         - containerPort: 8000
         env: 

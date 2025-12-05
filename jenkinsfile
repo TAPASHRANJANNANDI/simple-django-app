@@ -1,0 +1,186 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'DEPLOY_ENV', choices: ['blue', 'green'], description: 'Deploy to this environment (non-live). Service will switch to this on success.')
+    }
+
+    environment {
+        IMAGE_NAME        = "tapashranjannandi/simple-django-app-1"
+        DOCKERHUB_CREDS   = 'dockerhub-creds'
+        KUBECONFIG_CRED   = 'k8-token'
+
+        PROD_SERVICE_NAME = "simple-django-app-service"
+        BLUE_DEPLOYMENT   = "simple-django-app-blue"
+        GREEN_DEPLOYMENT  = "simple-django-app-green"
+    }
+
+    options {
+        timestamps()
+        timeout(time: 40, unit: 'MINUTES')
+    }
+
+    stages {
+
+        /* -------------------- GIT CHECKOUT -------------------- */
+        stage('Checkout') {
+            steps {
+                git branch: 'master',
+                    url: 'https://github.com/TAPASHRANJANNANDI/simple-django-app.git'
+            }
+        }
+
+        /* -------------------- SET VARIABLES -------------------- */
+        stage('Set Variables') {
+            steps {
+                script {
+                    env.TARGET = params.DEPLOY_ENV
+                    env.OTHER  = (params.DEPLOY_ENV == 'blue') ? 'green' : 'blue'
+                    env.TARGET_DEPLOYMENT = (env.TARGET == 'blue') ? env.BLUE_DEPLOYMENT : env.GREEN_DEPLOYMENT
+                    env.OTHER_DEPLOYMENT  = (env.OTHER  == 'blue') ? env.BLUE_DEPLOYMENT : env.GREEN_DEPLOYMENT
+                    env.IMAGE_TAG = env.TARGET
+
+                    echo "TARGET ENV       : ${env.TARGET}"
+                    echo "OTHER ENV        : ${env.OTHER}"
+                    echo "TARGET DEPLOY    : ${env.TARGET_DEPLOYMENT}"
+                }
+            }
+        }
+
+        /* -------------------- BUILD DOCKER IMAGE -------------------- */
+        stage('Build Docker Image') {
+            steps {
+                sh """
+                echo "Building Docker image ${IMAGE_NAME}:${IMAGE_TAG}"
+                docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                """
+            }
+        }
+
+        /* -------------------- LOGIN & PUSH IMAGE -------------------- */
+        stage('Login & Push Image') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh """
+                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+
+        /* -------------------- APPLY TARGET DEPLOYMENT -------------------- */
+        stage('Apply Target Deployment (non-live)') {
+            steps {
+                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
+                    script {
+                        if (env.TARGET == 'blue') {
+                            sh "kubectl apply -f deployment-blue.yaml"
+                        } else {
+                            sh "kubectl apply -f deployment-green.yaml"
+                        }
+                    }
+                }
+            }
+        }
+
+        /* -------------------- ROLLOUT & POD READY CHECK -------------------- */
+        stage('Wait for Rollout & Ready Pods') {
+            steps {
+                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
+                    script {
+                        sh "kubectl rollout status deployment/${env.TARGET_DEPLOYMENT} --timeout=120s"
+
+                        sh """
+                        READY_COUNT=0
+                        for i in \$(seq 1 12); do
+                          NOT_READY=\$(kubectl get pods -l app=simple-django-app,version=${env.TARGET} \
+                          -o jsonpath='{range .items[*]}{.metadata.name}:{.status.containerStatuses[0].ready}\\\\n{end}' || true)
+
+                          ALL_READY=\$(printf "%s" "\$NOT_READY" | grep -c ':true' || true)
+                          TOTAL=\$(printf "%s" "\$NOT_READY" | wc -l | tr -d ' ')
+
+                          if [ "\$TOTAL" -gt 0 ] && [ "\$ALL_READY" = "\$TOTAL" ]; then
+                            READY_COUNT=1
+                            break
+                          fi
+                          sleep 10
+                        done
+
+                        if [ "\$READY_COUNT" != "1" ]; then
+                          echo "Target pods not ready"
+                          exit 1
+                        fi
+                        """
+                    }
+                }
+            }
+        }
+
+        /* -------------------- PRE-SWITCH SMOKE TEST -------------------- */
+        stage('Pre-switch Smoke Test') {
+            steps {
+                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
+                    sh """
+                    POD=\$(kubectl get pods -l app=simple-django-app,version=${env.TARGET} \
+                    -o jsonpath='{.items[0].metadata.name}')
+
+                    kubectl exec \$POD -- /bin/sh -c 'curl -sfS http://127.0.0.1:8000/health'
+                    """
+                }
+            }
+        }
+
+        /* -------------------- SWITCH TRAFFIC (ZERO DOWNTIME) -------------------- */
+        stage('Switch Traffic (zero-downtime)') {
+            steps {
+                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
+                    sh """
+                    kubectl patch service ${env.PROD_SERVICE_NAME} \
+                    -p '{"spec":{"selector":{"app":"simple-django-app","version":"${env.TARGET}"}}}'
+                    """
+                }
+            }
+        }
+
+        /* -------------------- POST SWITCH HEALTH CHECK -------------------- */
+        stage('Post-switch Health Check') {
+            steps {
+                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
+                    sh """
+                    sleep 8
+                    kubectl run curl-test --image=radial/busyboxplus:curl -i --rm --restart=Never -- \
+                    /bin/sh -c 'curl -sfS http://${PROD_SERVICE_NAME}:8000/health'
+                    """
+                }
+            }
+        }
+
+        /* -------------------- SCALE DOWN OLD VERSION -------------------- */
+        stage('Scale down old version (optional)') {
+            steps {
+                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
+                    sh "kubectl scale deployment/${env.OTHER_DEPLOYMENT} --replicas=0 || true"
+                }
+            }
+        }
+    }
+
+    /* -------------------- AUTO ROLLBACK ON FAILURE -------------------- */
+    post {
+        failure {
+            withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
+                sh """
+                kubectl patch service ${env.PROD_SERVICE_NAME} \
+                -p '{"spec":{"selector":{"app":"simple-django-app","version":"${env.OTHER}"}}}' || true
+
+                kubectl rollout undo deployment/${env.TARGET_DEPLOYMENT} || true
+                """
+            }
+        }
+
+        success {
+            echo "✅ Blue-Green Deployment Completed Successfully with ZERO Downtime"
+        }
+    }
+}

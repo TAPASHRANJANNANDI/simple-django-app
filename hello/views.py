@@ -61,7 +61,7 @@ def search(request):
 
     if query:
         # 🔍 Search in Student model
-        student_results = Student.objects.filter(
+        student_results = student.objects.filter(
             Q(name__icontains=query) |
             Q(email__icontains=query) |
             Q(address__icontains=query) |

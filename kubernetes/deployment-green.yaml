@@ -4,19 +4,18 @@ metadata:
   name: simple-django-app-deployment
   labels:
     app: simple-django-app-green
-    version: green
+    color: green
 spec:
   replicas: 3
   selector:
-    color: green
     matchLabels:
       app: simple-django-app-green
-      version: green
+      color: green
   template:
     metadata:
       labels:
         app: simple-django-app-green
-        version: green
+        color: green
     spec:
       containers:
       - name: simple-django-app-green

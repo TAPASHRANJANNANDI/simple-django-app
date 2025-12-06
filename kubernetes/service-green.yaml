@@ -5,6 +5,7 @@ metadata:
 spec:
   selector:
     app: simple-django-app-green
+    color: green
   ports:
     - protocol: TCP
       port: 8000

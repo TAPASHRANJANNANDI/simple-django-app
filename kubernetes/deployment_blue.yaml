@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: simple-django-app-deployment
+  color: blue
   labels:
     app: simple-django-app
     color: blue

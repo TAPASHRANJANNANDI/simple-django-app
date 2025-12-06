@@ -8,6 +8,7 @@ metadata:
 spec:
   replicas: 3
   selector:
+    color: blue
     matchLabels:
       app: simple-django-app
       version: blue

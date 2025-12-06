@@ -1,18 +1,15 @@
 pipeline {
-    agent any
-
-    parameters {
-        choice(name: 'DEPLOY_ENV', choices: ['blue', 'green'], description: 'Deploy to this environment (non-live). Service will switch to this on success.')
-    }
+   agent { label 'built-in' } // ✅ Default runs on Jenkins master (build + push)
 
     environment {
         IMAGE_NAME        = "tapashranjannandi/simple-django-app-1"
         DOCKERHUB_CREDS   = 'dockerhub-creds'
-        KUBECONFIG_CRED   = 'k8-token'
 
-        PROD_SERVICE_NAME = "simple-django-app-service"
-        BLUE_DEPLOYMENT   = "simple-django-app-blue"
-        GREEN_DEPLOYMENT  = "simple-django-app-green"
+        BLUE_DEPLOYMENT_FILE  = "deployment_blue.yaml"
+        BLUE_SERVICE_FILE     = "service-blue.yaml"
+
+        GREEN_DEPLOYMENT_FILE = "deployment-green.yaml"
+        GREEN_SERVICE_FILE    = "service-green.yaml"
     }
 
     options {
@@ -20,9 +17,17 @@ pipeline {
         timeout(time: 40, unit: 'MINUTES')
     }
 
+    parameters {
+        choice(
+            name: 'TARGET_ENV',
+            choices: ['blue', 'green'],
+            description: 'Deploy to NON-LIVE environment only'
+        )
+    }
+
     stages {
 
-        /* -------------------- GIT CHECKOUT -------------------- */
+        // ✅ 1. CHECKOUT ON MASTER
         stage('Checkout') {
             steps {
                 git branch: 'master',
@@ -30,157 +35,95 @@ pipeline {
             }
         }
 
-        /* -------------------- SET VARIABLES -------------------- */
-        stage('Set Variables') {
+        // ✅ 2. SET TARGET ENV ON MASTER
+        stage('Set Target Environment') {
             steps {
                 script {
-                    env.TARGET = params.DEPLOY_ENV
-                    env.OTHER  = (params.DEPLOY_ENV == 'blue') ? 'green' : 'blue'
-                    env.TARGET_DEPLOYMENT = (env.TARGET == 'blue') ? env.BLUE_DEPLOYMENT : env.GREEN_DEPLOYMENT
-                    env.OTHER_DEPLOYMENT  = (env.OTHER  == 'blue') ? env.BLUE_DEPLOYMENT : env.GREEN_DEPLOYMENT
-                    env.IMAGE_TAG = env.TARGET
+                    env.DEPLOY_ENV = params.TARGET_ENV
+                    env.IMAGE_TAG = params.TARGET_ENV
 
-                    echo "TARGET ENV       : ${env.TARGET}"
-                    echo "OTHER ENV        : ${env.OTHER}"
-                    echo "TARGET DEPLOY    : ${env.TARGET_DEPLOYMENT}"
+                    if (params.TARGET_ENV == 'blue') {
+                        env.DEPLOY_FILE  = env.BLUE_DEPLOYMENT_FILE
+                        env.SERVICE_FILE = env.BLUE_SERVICE_FILE
+                    } else {
+                        env.DEPLOY_FILE  = env.GREEN_DEPLOYMENT_FILE
+                        env.SERVICE_FILE = env.GREEN_SERVICE_FILE
+                    }
+
+                    echo "✅ Target Env       : ${env.DEPLOY_ENV}"
+                    echo "✅ Deployment YAML : ${env.DEPLOY_FILE}"
+                    echo "✅ Service YAML    : ${env.SERVICE_FILE}"
                 }
             }
         }
 
-        /* -------------------- BUILD DOCKER IMAGE -------------------- */
+        // ✅ 3. BUILD ON MASTER
         stage('Build Docker Image') {
             steps {
+                sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+            }
+        }
+
+        // ✅ 4. PUSH ON MASTER
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: env.DOCKERHUB_CREDS,
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
+                    sh """
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+
+        // ✅ 5. DEPLOY ONLY ON KUBERNETES AGENT (`server`)
+        stage('Deploy to Kubernetes (Non-Live)') {
+            agent { label 'server' }   // 👈 executes ONLY here
+            steps {
                 sh """
-                echo "Building Docker image ${IMAGE_NAME}:${IMAGE_TAG}"
-                docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                    echo "🚀 Deploying to ${DEPLOY_ENV} environment..."
+
+                    kubectl apply -f kubernetes/${DEPLOY_FILE}
+                    kubectl apply -f kubernetes/${SERVICE_FILE}
+
+                    kubectl get pods
+                    kubectl get svc
                 """
             }
         }
 
-        /* -------------------- LOGIN & PUSH IMAGE -------------------- */
-        stage('Login & Push Image') {
+        // ✅ 6. MANUAL APPROVAL (RUNS ON MASTER)
+        stage('Manual Approval for Traffic Switch') {
             steps {
-                withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh """
-                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
-                    """
-                }
+                input message: "✅ Verify ${env.DEPLOY_ENV} environment. Switch production traffic?"
             }
         }
 
-        /* -------------------- APPLY TARGET DEPLOYMENT -------------------- */
-        stage('Apply Target Deployment (non-live)') {
+        // ✅ 7. LIVE SWITCH ONLY ON KUBERNETES AGENT (`server`)
+        stage('Switch Production Traffic') {
+            agent { label 'server' }   // 👈 executes ONLY here
             steps {
-                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
-                    script {
-                        if (env.TARGET == 'blue') {
-                            sh "kubectl apply -f deployment-blue.yaml"
-                        } else {
-                            sh "kubectl apply -f deployment-green.yaml"
-                        }
-                    }
-                }
-            }
-        }
-
-        /* -------------------- ROLLOUT & POD READY CHECK -------------------- */
-        stage('Wait for Rollout & Ready Pods') {
-            steps {
-                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
-                    script {
-                        sh "kubectl rollout status deployment/${env.TARGET_DEPLOYMENT} --timeout=120s"
-
-                        sh """
-                        READY_COUNT=0
-                        for i in \$(seq 1 12); do
-                          NOT_READY=\$(kubectl get pods -l app=simple-django-app,version=${env.TARGET} \
-                          -o jsonpath='{range .items[*]}{.metadata.name}:{.status.containerStatuses[0].ready}\\\\n{end}' || true)
-
-                          ALL_READY=\$(printf "%s" "\$NOT_READY" | grep -c ':true' || true)
-                          TOTAL=\$(printf "%s" "\$NOT_READY" | wc -l | tr -d ' ')
-
-                          if [ "\$TOTAL" -gt 0 ] && [ "\$ALL_READY" = "\$TOTAL" ]; then
-                            READY_COUNT=1
-                            break
-                          fi
-                          sleep 10
-                        done
-
-                        if [ "\$READY_COUNT" != "1" ]; then
-                          echo "Target pods not ready"
-                          exit 1
-                        fi
-                        """
-                    }
-                }
-            }
-        }
-
-        /* -------------------- PRE-SWITCH SMOKE TEST -------------------- */
-        stage('Pre-switch Smoke Test') {
-            steps {
-                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
-                    sh """
-                    POD=\$(kubectl get pods -l app=simple-django-app,version=${env.TARGET} \
-                    -o jsonpath='{.items[0].metadata.name}')
-
-                    kubectl exec \$POD -- /bin/sh -c 'curl -sfS http://127.0.0.1:8000/health'
-                    """
-                }
-            }
-        }
-
-        /* -------------------- SWITCH TRAFFIC (ZERO DOWNTIME) -------------------- */
-        stage('Switch Traffic (zero-downtime)') {
-            steps {
-                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
-                    sh """
-                    kubectl patch service ${env.PROD_SERVICE_NAME} \
-                    -p '{"spec":{"selector":{"app":"simple-django-app","version":"${env.TARGET}"}}}'
-                    """
-                }
-            }
-        }
-
-        /* -------------------- POST SWITCH HEALTH CHECK -------------------- */
-        stage('Post-switch Health Check') {
-            steps {
-                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
-                    sh """
-                    sleep 8
-                    kubectl run curl-test --image=radial/busyboxplus:curl -i --rm --restart=Never -- \
-                    /bin/sh -c 'curl -sfS http://${PROD_SERVICE_NAME}:8000/health'
-                    """
-                }
-            }
-        }
-
-        /* -------------------- SCALE DOWN OLD VERSION -------------------- */
-        stage('Scale down old version (optional)') {
-            steps {
-                withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
-                    sh "kubectl scale deployment/${env.OTHER_DEPLOYMENT} --replicas=0 || true"
-                }
+                sh """
+                    echo "🔁 Switching LIVE traffic..."
+                    kubectl apply -f kubernetes/${SERVICE_FILE}
+                    kubectl get svc
+                """
             }
         }
     }
 
-    /* -------------------- AUTO ROLLBACK ON FAILURE -------------------- */
     post {
-        failure {
-            withCredentials([file(credentialsId: env.KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
-                sh """
-                kubectl patch service ${env.PROD_SERVICE_NAME} \
-                -p '{"spec":{"selector":{"app":"simple-django-app","version":"${env.OTHER}"}}}' || true
-
-                kubectl rollout undo deployment/${env.TARGET_DEPLOYMENT} || true
-                """
-            }
-        }
-
         success {
-            echo "✅ Blue-Green Deployment Completed Successfully with ZERO Downtime"
+            echo "✅ Blue-Green Deployment Completed Successfully!"
+        }
+        failure {
+            echo "❌ Deployment Failed!"
         }
     }
 }

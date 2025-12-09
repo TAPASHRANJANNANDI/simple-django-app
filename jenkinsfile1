@@ -1,5 +1,5 @@
 pipeline {
- agent {'built-in'}
+ agent {label 'built-in'}
   environment {
         IMAGE_NAME        = "tapashranjannandi/simple-django-app-1"
         DOCKERHUB_CREDS   = 'dockerhub-creds'
@@ -46,7 +46,7 @@ pipeline {
             }
         }
         stage ('dev-server-deploy') {
-            agent {'server'}
+            agent {label 'server'}
             steps {
                 sh """ 
                  kubectl apply -f kubernetes-canary/dev/deployment.yaml 

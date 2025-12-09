@@ -47,11 +47,16 @@ pipeline {
         }
         stage ('dev-server-deploy') {
             agent {label 'server'}
+            
             steps {
+                git branch: 'master',
+                url: 'https://github.com/TAPASHRANJANNANDI/simple-django-app.git'
+
                 sh """ 
                  kubectl apply -f kubernetes-canary/dev/deployment.yaml 
-                 kubectl set image deployment/simple-django-app-deployment -n development simple-django-app=${IMAGE_NAME}:v${BUILD_NUMBER}
                  kubectl apply -f kubernetes-canary/dev/service.yaml
+                 kubectl set image deployment/simple-django-app-deployment -n development simple-django-app=${IMAGE_NAME}:v${BUILD_NUMBER}
+                 
                 """
             }
         }

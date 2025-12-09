@@ -1,0 +1,69 @@
+pipeline {
+ agent {'built-in'}
+  environment {
+        IMAGE_NAME        = "tapashranjannandi/simple-django-app-1"
+        DOCKERHUB_CREDS   = 'dockerhub-creds'
+        namespace         = "development"
+    }
+
+    options {
+        timestamps()
+        timeout(time: 40, unit: 'MINUTES')
+    }
+
+    // GITHUB WEBHOOK TRIGGER
+    triggers {
+        githubPush()
+    }
+    stages {
+        stage('git-checkout') {
+             steps {
+                git branch: 'master',
+                    url: 'https://github.com/TAPASHRANJANNANDI/simple-django-app.git'
+            }
+        }
+        stage('build') {
+            steps {
+             
+                sh "docker build -t ${IMAGE_NAME}:v${BUILD_NUMBER} ."
+       
+            }
+        }
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: env.DOCKERHUB_CREDS,
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
+                    sh """
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push ${IMAGE_NAME}:v${BUILD_NUMBER}
+                    """
+                }
+            }
+        }
+        stage ('dev-server-deploy') {
+            agent {'server'}
+            steps {
+                sh """ 
+                 kubectl apply -f kubernetes-canary/dev/deployment.yaml 
+                 kubectl set image deployment/simple-django-app-deployment -n development simple-django-app=${IMAGE_NAME}:v${BUILD_NUMBER}
+                 kubectl apply -f kubernetes-canary/dev/service.yaml
+                """
+            }
+        }
+        
+    }
+     post {
+        success {
+            echo "Webhook Triggered Canary Deployment Completed!"
+        }
+        failure {
+            echo "Webhook Deployment Failed!"
+        }
+    }
+
+}

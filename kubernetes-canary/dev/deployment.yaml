@@ -2,24 +2,22 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: simple-django-app-deployment
+  namespace: development
   labels:
     app: simple-django-app
-    color: blue
 spec:
   replicas: 3
   selector:
     matchLabels:
       app: simple-django-app
-      color: blue
   template:
     metadata:
       labels:
         app: simple-django-app
-        color: blue
     spec:
       containers:
       - name: simple-django-app
-        image: tapashranjannandi/simple-django-app-1:blue
+        image: tapashranjannandi/simple-django-app-1:v2
         ports:
         - containerPort: 8000
         env: 

@@ -1,5 +1,5 @@
 pipeline {
-   agent { label 'built-in' } // ✅ Default runs on Jenkins master (build + push)
+    agent { label 'built-in' }   // ✅ Jenkins Controller (Build + Push)
 
     environment {
         IMAGE_NAME        = "tapashranjannandi/simple-django-app-1"
@@ -17,17 +17,14 @@ pipeline {
         timeout(time: 40, unit: 'MINUTES')
     }
 
-    parameters {
-        choice(
-            name: 'TARGET_ENV',
-            choices: ['blue', 'green'],
-            description: 'Deploy to NON-LIVE environment only'
-        )
+    // ✅ GITHUB WEBHOOK TRIGGER
+    triggers {
+        githubPush()
     }
 
     stages {
 
-        // ✅ 1. CHECKOUT ON MASTER
+        // ✅ 1. CHECKOUT
         stage('Checkout') {
             steps {
                 git branch: 'master',
@@ -35,36 +32,44 @@ pipeline {
             }
         }
 
-        // ✅ 2. SET TARGET ENV ON MASTER
-        stage('Set Target Environment') {
+        // ✅ 2. AUTO-DETECT NON-LIVE ENV
+        stage('Select Non-Live Environment Automatically') {
+              agent { label 'server' }
             steps {
                 script {
-                    env.DEPLOY_ENV = params.TARGET_ENV
-                    env.IMAGE_TAG = params.TARGET_ENV
+                    // ✅ Check which service is live
+                    def liveColor = sh(
+    script: "kubectl get svc simple-django-app-service -o jsonpath=\"{.spec.selector['color']}\" 2>/dev/null || echo none",
+    returnStdout: true
+).trim()
 
-                    if (params.TARGET_ENV == 'blue') {
-                        env.DEPLOY_FILE  = env.BLUE_DEPLOYMENT_FILE
-                        env.SERVICE_FILE = env.BLUE_SERVICE_FILE
-                    } else {
-                        env.DEPLOY_FILE  = env.GREEN_DEPLOYMENT_FILE
+
+                    if (liveColor == "blue") {
+                        env.DEPLOY_ENV = "green"
+                        env.DEPLOY_FILE = env.GREEN_DEPLOYMENT_FILE
                         env.SERVICE_FILE = env.GREEN_SERVICE_FILE
+                    } else {
+                        env.DEPLOY_ENV = "blue"
+                        env.DEPLOY_FILE = env.BLUE_DEPLOYMENT_FILE
+                        env.SERVICE_FILE = env.BLUE_SERVICE_FILE
                     }
 
-                    echo "✅ Target Env       : ${env.DEPLOY_ENV}"
-                    echo "✅ Deployment YAML : ${env.DEPLOY_FILE}"
-                    echo "✅ Service YAML    : ${env.SERVICE_FILE}"
+                    env.IMAGE_TAG = env.DEPLOY_ENV
+
+                    echo "✅ LIVE ENV    : ${liveColor}"
+                    echo "✅ NON-LIVE ENV: ${env.DEPLOY_ENV}"
                 }
             }
         }
 
-        // ✅ 3. BUILD ON MASTER
+        // ✅ 3. BUILD IMAGE
         stage('Build Docker Image') {
             steps {
                 sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
             }
         }
 
-        // ✅ 4. PUSH ON MASTER
+        // ✅ 4. PUSH IMAGE
         stage('Push Docker Image') {
             steps {
                 withCredentials([
@@ -82,12 +87,12 @@ pipeline {
             }
         }
 
-        // ✅ 5. DEPLOY ONLY ON KUBERNETES AGENT (`server`)
+        // ✅ 5. AUTO DEPLOY TO NON-LIVE (K8s AGENT)
         stage('Deploy to Kubernetes (Non-Live)') {
-            agent { label 'server' }   // 👈 executes ONLY here
+            agent { label 'server' }
             steps {
                 sh """
-                    echo "🚀 Deploying to ${DEPLOY_ENV} environment..."
+                    echo "🚀 Auto deploying to NON-LIVE: ${DEPLOY_ENV}"
 
                     kubectl apply -f kubernetes/${DEPLOY_FILE}
                     kubectl apply -f kubernetes/${SERVICE_FILE}
@@ -98,19 +103,19 @@ pipeline {
             }
         }
 
-        // ✅ 6. MANUAL APPROVAL (RUNS ON MASTER)
+        // ✅ 6. MANUAL QA APPROVAL FOR PROD
         stage('Manual Approval for Traffic Switch') {
             steps {
-                input message: "✅ Verify ${env.DEPLOY_ENV} environment. Switch production traffic?"
+                input message: "✅ Testing Completed on ${DEPLOY_ENV}. Switch LIVE traffic?"
             }
         }
 
-        // ✅ 7. LIVE SWITCH ONLY ON KUBERNETES AGENT (`server`)
+        // ✅ 7. SWITCH LIVE TRAFFIC
         stage('Switch Production Traffic') {
-            agent { label 'server' }   // 👈 executes ONLY here
+            agent { label 'server' }
             steps {
                 sh """
-                    echo "🔁 Switching LIVE traffic..."
+                    echo "🔁 Switching production traffic to ${DEPLOY_ENV}"
                     kubectl apply -f kubernetes/${SERVICE_FILE}
                     kubectl get svc
                 """
@@ -120,10 +125,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ Blue-Green Deployment Completed Successfully!"
+            echo "✅ Webhook Triggered Blue-Green Deployment Completed!"
         }
         failure {
-            echo "❌ Deployment Failed!"
+            echo "❌ Webhook Deployment Failed!"
         }
     }
 }

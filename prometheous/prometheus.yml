@@ -1,0 +1,48 @@
+# my global config
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files: []
+
+scrape_configs:
+  # ---------- PROMETHEUS SELF ----------
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          app: "prometheus"
+
+  # ---------- NODE EXPORTER ----------
+  - job_name: "node_exporter"
+    static_configs:
+      - targets: ["15.206.125.108:9100"]
+
+  # ---------- BLACKBOX EXPORTER ----------
+  - job_name: "blackbox"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+
+    static_configs:
+      - targets:
+      # --- Add the URLs you want to monitor here ----
+        - https://github.com/TAPASHRANJANNANDI/simple-django-app
+        - http://a7596c5581274459c867b1c2a24a347e-888453048.ap-south-1.elb.amazonaws.com:8000  
+
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+
+      - source_labels: [__param_target]
+        target_label: instance
+
+      - target_label: __address__
+        replacement: 13.232.121.58:9115

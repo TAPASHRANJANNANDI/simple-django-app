@@ -206,7 +206,7 @@ Click **Save & Test**.
 ## **Node Exporter Dashboard**
 
 1. Go to Dashboard → New → Import
-2. Enter ID **1860**
+2. Enter ID 
 3. Select Prometheus DS
 
 ### Screenshot
@@ -218,7 +218,7 @@ Click **Save & Test**.
 ## **Blackbox Exporter Dashboard**
 
 1. Dashboard → New → Import
-2. Enter ID **7587**
+2. Enter ID 
 3. Select Prometheus DS
 
 ### Screenshot

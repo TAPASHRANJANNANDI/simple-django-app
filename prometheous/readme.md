@@ -211,7 +211,7 @@ Click **Save & Test**.
 
 ### Screenshot
 
-![Node Exporter Dashboard](node_exporter_screenshot.png)
+![Node Exporter Dashboard](../grafana/node-exporter.png)
 
 ---
 
@@ -223,7 +223,7 @@ Click **Save & Test**.
 
 ### Screenshot
 
-![Blackbox Exporter Dashboard](blackbox_exporter_screenshot.png)
+![Blackbox Exporter Dashboard](../grafana/blackbox-exporter.png)
 
 ---
 
